@@ -93,3 +93,13 @@ test('los errores inesperados no filtran detalles internos', async () => {
   assert.equal(response.title, 'Error interno del servidor.');
   assert.ok(!JSON.stringify(response).includes('SQLITE'));
 });
+
+test('rechaza caracteres nulos con 422 sin modificar la tarea', async () => {
+  const task = await api('POST', '/api/tasks', 201, input);
+  for (const field of ['title', 'description', 'assignee']) {
+    await api('POST', '/api/tasks', 422, { ...input, [field]: '\u0000hola' });
+    await api('PATCH', `/api/tasks/${task.id}`, 422, { [field]: 'hola\u0000' });
+  }
+  assert.deepEqual(await api('GET', `/api/tasks/${task.id}`, 200), task);
+  assert.equal((await api('GET', '/api/tasks', 200)).meta.total, 1);
+});

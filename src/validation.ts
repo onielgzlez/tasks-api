@@ -1,11 +1,12 @@
 import { z } from 'zod';
 
 export const statusSchema = z.enum(['pendiente', 'en_curso', 'hecha']);
+const text = z.string().trim().refine(value => !value.includes('\u0000'), 'No se permiten caracteres nulos.');
 const fields = {
-  title: z.string().trim().min(1).max(200),
-  description: z.string().trim().max(5000),
+  title: text.min(1).max(200),
+  description: text.max(5000),
   status: statusSchema,
-  assignee: z.string().trim().min(1).max(100),
+  assignee: text.min(1).max(100),
   dueDate: z.iso.date(),
 };
 export const createTaskSchema = z.strictObject({ ...fields, status: statusSchema.default('pendiente') });

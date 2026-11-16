@@ -48,3 +48,14 @@ test('validación: paginación acotada y parámetros repetidos rechazados', () =
     assert.equal(querySchema.safeParse(query).success, false);
   }
 });
+
+test('validación: rechaza NUL en textos al crear, editar y filtrar', () => {
+  for (const field of ['title', 'description', 'assignee']) {
+    for (const value of ['\u0000hola', 'ho\u0000la', 'hola\u0000']) {
+      assert.equal(createTaskSchema.safeParse({ ...input, [field]: value }).success, false);
+      assert.equal(updateTaskSchema.safeParse({ [field]: value }).success, false);
+    }
+  }
+  assert.equal(querySchema.safeParse({ assignee: 'Ana\u0000' }).success, false);
+  assert.ok(createTaskSchema.safeParse({ ...input, description: 'Línea 1\nLínea 2\t✓' }).success);
+});
