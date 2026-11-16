@@ -17,17 +17,17 @@ pnpm dev
 
 La API escucha en `http://127.0.0.1:3000/api/tasks`. La base persiste en `data/tasks.sqlite`. Ejecuta los comandos desde la raíz del proyecto. El servidor no arranca sin una clave configurada con el formato requerido.
 
-| Variable | Valor por defecto | Uso |
-| --- | --- | --- |
-| `API_TOKEN` | Sin valor por defecto; obligatoria | Clave privada de 64 caracteres hexadecimales minúsculos |
-| `PORT` | `3000` | Puerto entre 1 y 65535 |
-| `HOST` | `127.0.0.1` | Interfaz de escucha |
-| `DATABASE_PATH` | `./data/tasks.sqlite` | Archivo SQLite |
-| `REQUESTS_PER_MINUTE` | `300` | Máximo global por instancia, entre 1 y 10000 |
-| `MAX_TASKS` | `10000` | Máximo de tareas almacenadas, entre 1 y 100000 |
+| Variable              | Valor por defecto                  | Uso                                                     |
+| --------------------- | ---------------------------------- | ------------------------------------------------------- |
+| `API_TOKEN`           | Sin valor por defecto; obligatoria | Clave privada de 64 caracteres hexadecimales minúsculos |
+| `PORT`                | `3000`                             | Puerto entre 1 y 65535                                  |
+| `HOST`                | `127.0.0.1`                        | Interfaz de escucha                                     |
+| `DATABASE_PATH`       | `./data/tasks.sqlite`              | Archivo SQLite                                          |
+| `REQUESTS_PER_MINUTE` | `300`                              | Máximo global por instancia, entre 1 y 10000            |
+| `MAX_TASKS`           | `10000`                            | Máximo de tareas almacenadas, entre 1 y 100000          |
 
 ```sh
-pnpm check           # tipos + todos los tests + compilación
+pnpm check           # formato + tipos + todos los tests + compilación
 pnpm security:check  # auditoría de dependencias, incluidas las de desarrollo; necesita red
 pnpm build
 pnpm start           # ejecuta dist/server.js; requiere migrar antes
@@ -35,19 +35,30 @@ pnpm start           # ejecuta dist/server.js; requiere migrar antes
 
 `node:sqlite` puede emitir un aviso experimental según la versión de Node 24. El cierre por SIGINT/SIGTERM deja de aceptar peticiones, espera las activas y cierra la base.
 
+## Estilo de código
+
+Prettier fija el formato de TypeScript, JavaScript, JSON, YAML y Markdown; `.editorconfig` mantiene indentación de dos espacios y finales de línea LF.
+
+```sh
+pnpm format         # aplica el formato a los archivos soportados
+pnpm format:check   # comprueba el formato sin modificar archivos
+```
+
+`pnpm check` y CI comprueban el formato antes de los tipos y tests. Se excluyen secretos, archivos generados, lockfiles y migraciones SQL ya aplicadas; estas últimas conservan su checksum. Las nuevas migraciones usan indentación de dos espacios y palabras clave SQL en mayúsculas.
+
 ## Acceso y contrato HTTP
 
 Todas las rutas requieren `Authorization: Bearer <API_TOKEN>`. La clave representa a un cliente de confianza con permiso para gestionar **todas** las tareas; `assignee` es un dato de negocio, no una identidad autenticada. No se aceptan claves por URL ni cookies. Para revocar o rotar la clave, sustituye `API_TOKEN` en `.env` y reinicia el servidor: la clave anterior deja de ser válida.
 
 Los siguientes resultados presuponen una credencial válida:
 
-| Método | Ruta | Resultado |
-| --- | --- | --- |
-| POST | `/api/tasks` | Crea una tarea: 201 y cabecera Location |
-| GET | `/api/tasks` | Lista filtrada y paginada: 200 |
-| GET | `/api/tasks/:id` | Consulta: 200 o 404 |
-| PATCH | `/api/tasks/:id` | Edita los campos enviados: 200 o 404 |
-| DELETE | `/api/tasks/:id` | Borra: 204 sin cuerpo o 404 |
+| Método | Ruta             | Resultado                               |
+| ------ | ---------------- | --------------------------------------- |
+| POST   | `/api/tasks`     | Crea una tarea: 201 y cabecera Location |
+| GET    | `/api/tasks`     | Lista filtrada y paginada: 200          |
+| GET    | `/api/tasks/:id` | Consulta: 200 o 404                     |
+| PATCH  | `/api/tasks/:id` | Edita los campos enviados: 200 o 404    |
+| DELETE | `/api/tasks/:id` | Borra: 204 sin cuerpo o 404             |
 
 POST y PATCH requieren `Content-Type: application/json`. Los cuerpos comprimidos se rechazan con 415; no hay necesidad de descomprimir cuerpos de tareas de hasta 32 KB.
 
@@ -72,13 +83,13 @@ curl -i -X DELETE http://127.0.0.1:3000/api/tasks/1 \
   -H "Authorization: Bearer $API_TOKEN"
 ```
 
-| Campo | Regla |
-| --- | --- |
-| `title` | Obligatorio, 1–200 caracteres tras quitar espacios exteriores |
-| `description` | Obligatoria, permite cadena vacía, máximo 5000 caracteres |
-| `status` | `pendiente`, `en_curso` o `hecha`; por defecto `pendiente` al crear |
-| `assignee` | Obligatorio, 1–100 caracteres; nombre, sin catálogo de usuarios |
-| `dueDate` | Fecha real `YYYY-MM-DD`; permite fechas vencidas |
+| Campo         | Regla                                                               |
+| ------------- | ------------------------------------------------------------------- |
+| `title`       | Obligatorio, 1–200 caracteres tras quitar espacios exteriores       |
+| `description` | Obligatoria, permite cadena vacía, máximo 5000 caracteres           |
+| `status`      | `pendiente`, `en_curso` o `hecha`; por defecto `pendiente` al crear |
+| `assignee`    | Obligatorio, 1–100 caracteres; nombre, sin catálogo de usuarios     |
+| `dueDate`     | Fecha real `YYYY-MM-DD`; permite fechas vencidas                    |
 
 La respuesta añade `id`, `createdAt` y `updatedAt` (timestamps UTC). PATCH exige al menos un campo. Se rechazan campos desconocidos, valores `null` y caracteres nulos (`\u0000`) en título, descripción y responsable. Se puede reabrir una tarea hecha.
 
@@ -105,18 +116,18 @@ Errores de la aplicación con `Content-Type: application/problem+json`:
 }
 ```
 
-| Código | Motivo |
-| --- | --- |
-| 400 | JSON, URL, ID o query inválidos |
-| 401 | Credencial ausente o inválida; incluye `WWW-Authenticate` |
-| 404 | Ruta o tarea inexistente |
-| 409 | Cuota de tareas alcanzada; borrar alguna permite volver a crear |
-| 413 | Cuerpo mayor de 32 KB |
-| 415 | Formato o compresión no soportados |
-| 422 | Datos de una tarea inválidos |
-| 429 | Límite global de peticiones alcanzado; incluye `Retry-After` |
-| 500 | Error inesperado, sin detalles internos en la respuesta |
-| 503 | SQLite ocupada por otra conexión; incluye `Retry-After: 1` |
+| Código | Motivo                                                          |
+| ------ | --------------------------------------------------------------- |
+| 400    | JSON, URL, ID o query inválidos                                 |
+| 401    | Credencial ausente o inválida; incluye `WWW-Authenticate`       |
+| 404    | Ruta o tarea inexistente                                        |
+| 409    | Cuota de tareas alcanzada; borrar alguna permite volver a crear |
+| 413    | Cuerpo mayor de 32 KB                                           |
+| 415    | Formato o compresión no soportados                              |
+| 422    | Datos de una tarea inválidos                                    |
+| 429    | Límite global de peticiones alcanzado; incluye `Retry-After`    |
+| 500    | Error inesperado, sin detalles internos en la respuesta         |
+| 503    | SQLite ocupada por otra conexión; incluye `Retry-After: 1`      |
 
 El servidor HTTP limita cabeceras a 8 KB, recepción de cabeceras a 10 segundos, recepción de peticiones a 15 segundos y keep-alive a 5 segundos. Los rechazos del parser HTTP de Node (por ejemplo, 431 por cabeceras excesivas) ocurren antes de Express y no usan el formato JSON de la aplicación.
 
