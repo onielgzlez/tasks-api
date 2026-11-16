@@ -1,11 +1,15 @@
 import express, { type ErrorRequestHandler } from 'express';
 import { z } from 'zod';
 import type { DatabaseSync } from 'node:sqlite';
-import { TaskRepository } from './tasks.js';
-import { createTaskSchema, idSchema, querySchema, updateTaskSchema } from './validation.js';
+import { TaskRepository } from './tasks.ts';
+import { createTaskSchema, idSchema, querySchema, updateTaskSchema } from './validation.ts';
 
 class HttpError extends Error {
-  constructor(readonly status: number, message: string, readonly errors?: unknown) { super(message); }
+  readonly status: number;
+  readonly errors?: unknown;
+  constructor(status: number, message: string, errors?: unknown) {
+    super(message); this.status = status; this.errors = errors;
+  }
 }
 function parse<T>(schema: z.ZodType<T>, value: unknown, status = 422): T {
   const result = schema.safeParse(value);

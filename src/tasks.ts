@@ -1,11 +1,12 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
-import type { Task, TaskInput, TaskQuery } from './validation.js';
+import type { Task, TaskInput, TaskQuery } from './validation.ts';
 
 const columns = `id, title, description, status, assignee, due_date AS dueDate,
   created_at AS createdAt, updated_at AS updatedAt`;
 
 export class TaskRepository {
-  constructor(private readonly db: DatabaseSync) {}
+  private readonly db: DatabaseSync;
+  constructor(db: DatabaseSync) { this.db = db; }
 
   create(input: TaskInput): Task {
     return this.db.prepare(`INSERT INTO tasks(title, description, status, assignee, due_date)
