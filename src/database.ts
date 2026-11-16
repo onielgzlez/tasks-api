@@ -6,8 +6,21 @@ import { createHash } from 'node:crypto';
 export function openDatabase(path: string): DatabaseSync {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
-  db.exec('PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL;');
+  try {
+    // Never sleep in SQLite's synchronous busy handler on the HTTP event loop.
+    db.exec('PRAGMA busy_timeout = 0; PRAGMA journal_mode = WAL;');
+  } catch (error) {
+    db.close();
+    throw error;
+  }
   return db;
+}
+
+export function isDatabaseBusy(error: unknown): boolean {
+  if (!(error instanceof Error) || !('code' in error) || error.code !== 'ERR_SQLITE_ERROR'
+    || !('errcode' in error) || typeof error.errcode !== 'number') return false;
+  // Include extended SQLITE_BUSY codes, but not SQLITE_LOCKED (a different conflict).
+  return (error.errcode & 0xff) === 5;
 }
 
 export function migrate(db: DatabaseSync, directory = new URL('../migrations/', import.meta.url)): void {

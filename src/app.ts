@@ -2,6 +2,7 @@ import express, { type ErrorRequestHandler } from 'express';
 import { z } from 'zod';
 import type { DatabaseSync } from 'node:sqlite';
 import { TaskRepository } from './tasks.ts';
+import { isDatabaseBusy } from './database.ts';
 import { createTaskSchema, idSchema, querySchema, updateTaskSchema } from './validation.ts';
 
 class HttpError extends Error {
@@ -56,6 +57,10 @@ export function createApp(db: DatabaseSync, logError: (error: unknown) => void =
   app.use((_req, _res, next) => next(new HttpError(404, 'Ruta no encontrada.')));
   const errorHandler: ErrorRequestHandler = (error: unknown, req, res, _next) => {
     let problem = error instanceof HttpError ? error : undefined;
+    if (!problem && isDatabaseBusy(error)) {
+      problem = new HttpError(503, 'Base de datos ocupada. Inténtalo de nuevo más tarde.');
+      res.set('Retry-After', '1');
+    }
     const bodyError = error as { type?: string; status?: number } | null;
     if (!problem && bodyError?.type === 'entity.parse.failed') problem = new HttpError(400, 'JSON mal formado.');
     if (!problem && bodyError?.type === 'entity.too.large') problem = new HttpError(413, 'El cuerpo supera 32 KB.');

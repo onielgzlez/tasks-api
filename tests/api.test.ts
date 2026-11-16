@@ -1,15 +1,20 @@
 import { afterEach, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Server } from 'node:http';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createApp } from '../src/app.ts';
 import { migrate, openDatabase } from '../src/database.ts';
 
 let db: ReturnType<typeof openDatabase>;
 let server: Server;
 let base: string;
+let directory: string;
 const input = { title: 'Preparar entrega', description: 'Revisar contrato HTTP', assignee: 'Ana', dueDate: '2026-12-10' };
 beforeEach(async () => {
-  db = openDatabase(':memory:'); migrate(db);
+  directory = mkdtempSync(join(tmpdir(), 'tasks-http-'));
+  db = openDatabase(join(directory, 'tasks.sqlite')); migrate(db);
   server = createApp(db, () => {}).listen(0, '127.0.0.1');
   await new Promise<void>((resolve, reject) => { server.once('listening', resolve); server.once('error', reject); });
   const address = server.address();
@@ -19,6 +24,7 @@ beforeEach(async () => {
 afterEach(async () => {
   if (server?.listening) await new Promise<void>(resolve => server.close(() => resolve()));
   db?.close();
+  if (directory) rmSync(directory, { recursive: true, force: true });
 });
 async function api(method: string, path: string, status: number, body?: unknown) {
   const response = await fetch(base + path, { method, ...(body !== undefined ? {
@@ -102,4 +108,23 @@ test('rechaza caracteres nulos con 422 sin modificar la tarea', async () => {
   }
   assert.deepEqual(await api('GET', `/api/tasks/${task.id}`, 200), task);
   assert.equal((await api('GET', '/api/tasks', 200)).meta.total, 1);
+});
+
+
+test('un bloqueo externo devuelve 503 y Retry-After sin insertar ni impedir lecturas', async () => {
+  const other = openDatabase(join(directory, 'tasks.sqlite'));
+  try {
+    other.exec('BEGIN IMMEDIATE');
+    const response = await fetch(base + '/api/tasks', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+    });
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get('retry-after'), '1');
+    assert.match(response.headers.get('content-type')!, /application\/problem\+json/);
+    assert.equal((await response.json()).status, 503);
+    assert.equal((await api('GET', '/api/tasks', 200)).meta.total, 0);
+    other.exec('ROLLBACK');
+    await api('POST', '/api/tasks', 201, input);
+    assert.equal((await api('GET', '/api/tasks', 200)).meta.total, 1);
+  } finally { other.close(); }
 });
