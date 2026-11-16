@@ -56,7 +56,7 @@ curl -i -X DELETE http://127.0.0.1:3000/api/tasks/1
 | `assignee` | Obligatorio, 1–100 caracteres; nombre, sin catálogo de usuarios |
 | `dueDate` | Fecha real `YYYY-MM-DD`; permite fechas vencidas |
 
-La respuesta añade `id`, `createdAt` y `updatedAt` (timestamps UTC). PATCH exige al menos un campo. Se rechazan campos desconocidos y valores `null`. No se imponen transiciones de estado: una tarea hecha puede reabrirse.
+La respuesta añade `id`, `createdAt` y `updatedAt` (timestamps UTC). PATCH exige al menos un campo. Se rechazan campos desconocidos, valores `null` y caracteres nulos (`\u0000`) en título, descripción y responsable. No se imponen transiciones de estado: una tarea hecha puede reabrirse.
 
 Filtros `status` y `assignee` combinados con AND. Responsable por coincidencia exacta, sensible a mayúsculas. `page` por defecto 1 (máximo 1 000 000); `limit` por defecto 20 (máximo 100). Solo enteros positivos. Orden por ID ascendente. Parámetros desconocidos o repetidos producen 400.
 
@@ -81,25 +81,28 @@ Errores con `Content-Type: application/problem+json`:
 }
 ```
 
-400 para JSON mal formado, ID o query inválidos; 404 para ruta/recurso inexistente; 413 para cuerpos mayores de 32 KB; 415 para formato no soportado; 422 para datos inválidos; 500 para fallos inesperados. Los detalles internos se registran en el servidor, nunca en la respuesta.
+400 para JSON mal formado, ID o query inválidos; 404 para ruta/recurso inexistente; 413 para cuerpos mayores de 32 KB; 415 para formato no soportado; 422 para datos inválidos; 500 para fallos inesperados; 503 con `Retry-After: 1` cuando otra conexión mantiene ocupada SQLite. Los detalles internos se registran en el servidor, nunca en la respuesta.
 
 ## Pruebas y verificación de esta entrega
 
-Hay **13 tests**: ocho de integración HTTP y cinco de persistencia, migraciones y validación. Las pruebas HTTP levantan un servidor en un puerto efímero y crean una base SQLite independiente en memoria. Las pruebas de persistencia usan un directorio temporal que se elimina al terminar.
+Hay **20 tests**: diez de integración HTTP y diez de persistencia, migraciones y validación. Las pruebas HTTP levantan un servidor en un puerto efímero y crean una base SQLite independiente en un directorio temporal, permitiendo comprobar bloqueos reales entre conexiones. Las pruebas de persistencia usan un directorio temporal que se elimina al terminar.
 
 Verificado en Node 24.18.0 con pnpm 12.21.0:
 
 - `pnpm typecheck` y `pnpm build`: correctos.
-- `pnpm test:core`: cinco tests pasan.
+- `pnpm test:core`: diez tests pasan, incluidos caracteres nulos, bloqueos, recuperación, plan de consulta y actualización de una base existente.
 - `pnpm migrate`, ejecutado dos veces: correcto, sin duplicar migraciones.
-- `pnpm test`: los ocho casos HTTP quedaron bloqueados en el arranque por `listen EPERM`, porque el sandbox de ejecución no permite abrir puertos. No se presentan como aprobados. Ejecutar `pnpm check` en un entorno con permisos de red local o en CI para completar la validación.
+- `pnpm check`: correcto; pasan los 20 tests, incluidos los diez de integración HTTP, además del chequeo de tipos y la compilación. La restricción inicial de puertos (`listen EPERM`) se resolvió al cambiar los permisos del entorno y se volvió a ejecutar la suite completa.
 
-El registro de paquetes tampoco era accesible desde ese entorno. La instalación se resolvió con pnpm a partir de paquetes ya disponibles en caché. El lockfile conserva referencias normales al registro e integridades, sin rutas locales. La comprobación final de instalación offline no pudo completar la política de dependencias de pnpm por falta de metadatos completos de `inherits` en caché; no se desactivó esa política. La ejecución de CI está configurada, pero no se ha publicado ni ejecutado remotamente.
+Durante la implementación inicial, el registro de paquetes no era accesible desde el entorno restringido. La instalación se resolvió con pnpm a partir de paquetes ya disponibles en caché. El lockfile conserva referencias normales al registro e integridades, sin rutas locales. La comprobación final de instalación offline no pudo completar la política de dependencias de pnpm por falta de metadatos completos de `inherits` en caché; no se desactivó esa política. La ejecución de CI está configurada, pero no se ha publicado ni ejecutado remotamente.
 
 ## Decisiones
 
 - **Express frente a NestJS:** el alcance cabe en cinco rutas. La separación entre HTTP (`app.ts`), validación (`validation.ts`) y SQL (`tasks.ts`) permite ampliar el proyecto sin una jerarquía de capas vacías.
 - **SQLite frente a PostgreSQL:** facilita reproducir la entrega. El driver incluido en Node evita una dependencia nativa adicional. Las consultas son síncronas: adecuado para este tamaño, pero bloquean el event loop durante su ejecución.
+- **Bloqueos de SQLite:** `busy_timeout=0` evita esperar dentro del driver síncrono cuando otra conexión bloquea una escritura. La API devuelve 503 con `Retry-After: 1`; no reintenta escrituras automáticamente. Los clientes pueden reintentar ese rechazo con espera y un límite de intentos. Esto no hace asíncronas las consultas ni elimina el coste de páginas profundas.
+- **Índices:** la migración `002` añade `(assignee, id)` para filtrar por responsable conservando el orden sin una ordenación temporal adicional. La migración original permanece intacta. Ejecutar `pnpm migrate` para actualizar una instalación existente.
+- **TypeScript:** `tsconfig.json` tiene `noEmit: true` para el editor y el chequeo de tipos; `tsconfig.build.json` lo sobrescribe con `false`. `rewriteRelativeImportExtensions` convierte los imports `.ts` a `.js` en `dist/`.
 - **SQL parametrizado:** los valores del cliente no se interpolan. Las columnas de PATCH salen de un mapa cerrado validado.
 - **Fecha de calendario:** una fecha límite sin hora no debe cambiar al convertir zonas horarias.
 - **Migraciones explícitas:** `pnpm migrate` aplica los SQL ordenados dentro de una transacción y registra su checksum. Repetirlo es seguro; editar una migración aplicada da error. Para cambios futuros, añadir otro archivo numerado. No hay rollback destructivo automático; hacer backup antes de cambios de esquema.
@@ -119,6 +122,7 @@ Esta implementación fue realizada por Codex a partir del encargo del usuario; n
 - **Qué se pidió:** CRUD REST con Node/TypeScript, filtros, paginación, validación, migraciones, al menos tres tests, README y commits progresivos. Después se pidió usar pnpm.
 - **Qué se incorporó:** Express + SQLite, separación pequeña de responsabilidades, validación Zod, migraciones SQL y pruebas de comportamiento. Estas fueron decisiones del agente dentro de las alternativas autorizadas, no aprobaciones humanas adicionales.
 - **Qué se corrigió durante el trabajo:** se cambió npm por pnpm tras la indicación del usuario. Se sustituyó el borrador con Supertest por `fetch` y `node:test`, reduciendo dependencias. Se eliminó también tsx: Node 24 ejecuta directamente el TypeScript empleado, y TypeScript compila la distribución JavaScript. La falta de acceso al registro obligó a recuperar dependencias desde la caché local para verificar el proyecto.
+- **Correcciones tras la revisión:** se rechazaron caracteres nulos antes de SQLite, se eliminó la espera síncrona ante bloqueos y se añadió el índice por responsable con pruebas de regresión. Se conservaron y verificaron los ajustes de `noEmit` aportados por el usuario. Tras habilitar la escritura en Git, estos cambios se guardaron en commits separados de configuración, validación, bloqueos e índices; la verificación final aprobó los 20 tests.
 - **Qué se debe revisar:** los supuestos de dominio (responsable como nombre, fechas sin hora y reapertura de tareas), las limitaciones de concurrencia y el contrato HTTP antes de integrarlo en otro sistema.
 
 El historial Git separa diseño, persistencia, HTTP, pruebas y documentación. `git log --oneline` muestra esa evolución.
