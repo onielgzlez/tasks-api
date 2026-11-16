@@ -94,7 +94,7 @@ Verificado en Node 24.18.0 con pnpm 12.21.0:
 - `pnpm migrate`, ejecutado dos veces: correcto, sin duplicar migraciones.
 - `pnpm test`: los ocho casos HTTP quedaron bloqueados en el arranque por `listen EPERM`, porque el sandbox de ejecución no permite abrir puertos. No se presentan como aprobados. Ejecutar `pnpm check` en un entorno con permisos de red local o en CI para completar la validación.
 
-El registro de paquetes tampoco era accesible desde ese entorno. La instalación se resolvió con pnpm a partir de paquetes ya disponibles en caché. El lockfile conserva referencias normales al registro e integridades, sin rutas locales. La ejecución de CI está configurada, pero no se ha publicado ni ejecutado remotamente.
+El registro de paquetes tampoco era accesible desde ese entorno. La instalación se resolvió con pnpm a partir de paquetes ya disponibles en caché. El lockfile conserva referencias normales al registro e integridades, sin rutas locales. La comprobación final de instalación offline no pudo completar la política de dependencias de pnpm por falta de metadatos completos de `inherits` en caché; no se desactivó esa política. La ejecución de CI está configurada, pero no se ha publicado ni ejecutado remotamente.
 
 ## Decisiones
 
