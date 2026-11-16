@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { isDatabaseBusy, migrate, openDatabase } from '../src/database.ts';
-import { TaskRepository } from '../src/tasks.ts';
+import { TaskCapacityError, TaskRepository } from '../src/tasks.ts';
 
 test('migraciones repetibles y persistencia al reabrir la base', () => {
   const directory = mkdtempSync(join(tmpdir(), 'tasks-test-'));
@@ -104,4 +104,23 @@ test('la segunda migración actualiza una base existente sin perder tareas', () 
     assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'tasks_assignee_id'").get());
     assert.equal(db.prepare('SELECT count(*) AS n FROM schema_migrations').get()!.n, 2);
   } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+
+test('la cuota se comparte entre conexiones y persiste tras reabrir la base', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'tasks-quota-'));
+  const path = join(directory, 'tasks.sqlite');
+  const db = openDatabase(path);
+  let other: ReturnType<typeof openDatabase> | undefined;
+  try {
+    migrate(db);
+    const first = new TaskRepository(db, 1);
+    const input = { title: 'Cuota', description: '', status: 'pendiente' as const, assignee: 'Ana', dueDate: '2026-12-10' };
+    first.create(input);
+    other = openDatabase(path);
+    assert.throws(() => new TaskRepository(other!, 1).create(input), TaskCapacityError);
+    other.close(); other = openDatabase(path);
+    assert.throws(() => new TaskRepository(other!, 1).create(input), TaskCapacityError);
+    assert.equal(first.list({ page: 1, limit: 20 }).meta.total, 1);
+  } finally { other?.close(); db.close(); rmSync(directory, { recursive: true, force: true }); }
 });

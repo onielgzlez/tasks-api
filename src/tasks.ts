@@ -4,14 +4,25 @@ import type { Task, TaskInput, TaskQuery } from './validation.ts';
 const columns = `id, title, description, status, assignee, due_date AS dueDate,
   created_at AS createdAt, updated_at AS updatedAt`;
 
+export class TaskCapacityError extends Error {
+  constructor() { super('Task capacity reached'); }
+}
+
 export class TaskRepository {
   private readonly db: DatabaseSync;
-  constructor(db: DatabaseSync) { this.db = db; }
+  private readonly maxTasks: number;
+  constructor(db: DatabaseSync, maxTasks = 10_000) {
+    if (!Number.isInteger(maxTasks) || maxTasks < 1 || maxTasks > 100_000) throw new Error('Invalid task capacity');
+    this.db = db; this.maxTasks = maxTasks;
+  }
 
   create(input: TaskInput): Task {
-    return this.db.prepare(`INSERT INTO tasks(title, description, status, assignee, due_date)
-      VALUES (?, ?, ?, ?, ?) RETURNING ${columns}`)
-      .get(input.title, input.description, input.status, input.assignee, input.dueDate) as Task;
+    // Checking the quota and inserting in one statement prevents concurrent writers exceeding it.
+    const task = this.db.prepare(`INSERT INTO tasks(title, description, status, assignee, due_date)
+      SELECT ?, ?, ?, ?, ? WHERE (SELECT count(*) FROM tasks) < ? RETURNING ${columns}`)
+      .get(input.title, input.description, input.status, input.assignee, input.dueDate, this.maxTasks) as Task | undefined;
+    if (!task) throw new TaskCapacityError();
+    return task;
   }
 
   get(id: number): Task | undefined {

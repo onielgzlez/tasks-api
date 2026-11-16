@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 import type { Server } from 'node:http';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -8,6 +9,7 @@ import { gzipSync, deflateSync, brotliCompressSync } from 'node:zlib';
 import { createApp } from '../src/app.ts';
 import { migrate, openDatabase } from '../src/database.ts';
 
+const apiToken = randomBytes(32).toString('hex');
 let db: ReturnType<typeof openDatabase>;
 let server: Server;
 let base: string;
@@ -16,7 +18,7 @@ const input = { title: 'Preparar entrega', description: 'Revisar contrato HTTP',
 beforeEach(async () => {
   directory = mkdtempSync(join(tmpdir(), 'tasks-http-'));
   db = openDatabase(join(directory, 'tasks.sqlite')); migrate(db);
-  server = createApp(db, () => {}).listen(0, '127.0.0.1');
+  server = createApp(db, { apiToken, logError: () => {} }).listen(0, '127.0.0.1');
   await new Promise<void>((resolve, reject) => { server.once('listening', resolve); server.once('error', reject); });
   const address = server.address();
   assert.ok(address && typeof address === 'object');
@@ -27,8 +29,13 @@ afterEach(async () => {
   db?.close();
   if (directory) rmSync(directory, { recursive: true, force: true });
 });
+function authenticatedFetch(url: string, init: RequestInit = {}) {
+  const headers = new Headers(init.headers);
+  headers.set('Authorization', `Bearer ${apiToken}`);
+  return fetch(url, { ...init, headers });
+}
 async function api(method: string, path: string, status: number, body?: unknown) {
-  const response = await fetch(base + path, { method, ...(body !== undefined ? {
+  const response = await authenticatedFetch(base + path, { method, ...(body !== undefined ? {
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   } : {}) });
   assert.equal(response.status, status);
@@ -38,7 +45,7 @@ async function api(method: string, path: string, status: number, body?: unknown)
 }
 
 test('crear, consultar, editar y borrar una tarea', async () => {
-  const response = await fetch(base + '/api/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
+  const response = await authenticatedFetch(base + '/api/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
   assert.equal(response.status, 201);
   const created = await response.json();
   const url = `/api/tasks/${created.id}`;
@@ -82,8 +89,8 @@ test('devuelve 404 coherente para recursos y rutas inexistentes', async () => {
 });
 
 test('distingue JSON mal formado, tipo no soportado y cuerpo demasiado grande', async () => {
-  assert.equal((await fetch(base + '/api/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{' })).status, 400);
-  assert.equal((await fetch(base + '/api/tasks', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: 'hola' })).status, 415);
+  assert.equal((await authenticatedFetch(base + '/api/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{' })).status, 400);
+  assert.equal((await authenticatedFetch(base + '/api/tasks', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: 'hola' })).status, 415);
   await api('POST', '/api/tasks', 413, { ...input, description: 'x'.repeat(40_000) });
 });
 
@@ -116,7 +123,7 @@ test('un bloqueo externo devuelve 503 y Retry-After sin insertar ni impedir lect
   const other = openDatabase(join(directory, 'tasks.sqlite'));
   try {
     other.exec('BEGIN IMMEDIATE');
-    const response = await fetch(base + '/api/tasks', {
+    const response = await authenticatedFetch(base + '/api/tasks', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
     });
     assert.equal(response.status, 503);
@@ -175,7 +182,7 @@ test('rechaza cuerpos comprimidos antes de descomprimirlos y sigue disponible', 
     ['gzip', gzipSync], ['deflate', deflateSync], ['br', brotliCompressSync],
   ] as const) {
     const compressed = compress(Buffer.from(JSON.stringify(input)));
-    const response = await fetch(base + '/api/tasks', {
+    const response = await authenticatedFetch(base + '/api/tasks', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Encoding': encoding },
       body: Buffer.concat([compressed, Buffer.from('trailing bytes')]),
     });
