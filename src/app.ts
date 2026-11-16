@@ -39,7 +39,7 @@ export function createApp(db: DatabaseSync, logError: (error: unknown) => void =
     }
     next();
   });
-  app.use(express.json({ limit: '32kb' }));
+  app.use(express.json({ limit: '32kb', inflate: false }));
   app.post('/api/tasks', (req, res) => {
     const task = tasks.create(parse(createTaskSchema, req.body));
     res.location(`/api/tasks/${task.id}`).status(201).json(task);
@@ -62,6 +62,7 @@ export function createApp(db: DatabaseSync, logError: (error: unknown) => void =
       res.set('Retry-After', '1');
     }
     const bodyError = error as { type?: string; status?: number } | null;
+    if (!problem && error instanceof URIError && bodyError?.status === 400) problem = new HttpError(400, 'URL mal formada.');
     if (!problem && bodyError?.type === 'entity.parse.failed') problem = new HttpError(400, 'JSON mal formado.');
     if (!problem && bodyError?.type === 'entity.too.large') problem = new HttpError(413, 'El cuerpo supera 32 KB.');
     if (!problem && bodyError?.status === 415) problem = new HttpError(415, 'Codificación no soportada.');
