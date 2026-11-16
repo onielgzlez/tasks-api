@@ -1,7 +1,10 @@
 import { z } from 'zod';
 
 export const statusSchema = z.enum(['pendiente', 'en_curso', 'hecha']);
-const text = z.string().trim().refine(value => !value.includes('\u0000'), 'No se permiten caracteres nulos.');
+const text = z
+  .string()
+  .trim()
+  .refine((value) => !value.includes('\u0000'), 'No se permiten caracteres nulos.');
 const fields = {
   title: text.min(1).max(200),
   description: text.max(5000),
@@ -9,11 +12,20 @@ const fields = {
   assignee: text.min(1).max(100),
   dueDate: z.iso.date(),
 };
-export const createTaskSchema = z.strictObject({ ...fields, status: statusSchema.default('pendiente') });
-export const updateTaskSchema = z.strictObject(fields).partial()
-  .refine(value => Object.keys(value).length > 0, 'Envía al menos un campo.');
-const positiveInteger = (max: number) => z.string().regex(/^[1-9]\d*$/)
-  .transform(Number).pipe(z.number().int().min(1).max(max));
+export const createTaskSchema = z.strictObject({
+  ...fields,
+  status: statusSchema.default('pendiente'),
+});
+export const updateTaskSchema = z
+  .strictObject(fields)
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, 'Envía al menos un campo.');
+const positiveInteger = (max: number) =>
+  z
+    .string()
+    .regex(/^[1-9]\d*$/)
+    .transform(Number)
+    .pipe(z.number().int().min(1).max(max));
 export const idSchema = positiveInteger(Number.MAX_SAFE_INTEGER);
 export const querySchema = z.strictObject({
   status: statusSchema.optional(),

@@ -13,8 +13,10 @@ export function readConfig(env: NodeJS.ProcessEnv) {
   const result = configSchema.safeParse(env);
   if (!result.success) {
     // Configuration failures identify fields only, never their secret values.
-    const fields = [...new Set(result.error.issues.map(issue => issue.path.join('.')))];
-    throw new Error(`Configuración inválida: ${fields.join(', ')}. Revisa .env.example y el README.`);
+    const fields = [...new Set(result.error.issues.map((issue) => issue.path.join('.')))];
+    throw new Error(
+      `Configuración inválida: ${fields.join(', ')}. Revisa .env.example y el README.`,
+    );
   }
   return result.data;
 }

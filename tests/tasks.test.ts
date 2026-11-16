@@ -17,8 +17,13 @@ test('persistencia: CRUD completo, filtros combinados y paginación', () => {
     tasks.create(createTaskSchema.parse({ ...input, status: 'hecha' }));
     assert.equal(first.status, 'pendiente');
     assert.deepEqual(tasks.get(first.id), first);
-    const page = tasks.list(querySchema.parse({ assignee: 'Ana', status: 'pendiente', limit: '1', page: '2' }));
-    assert.deepEqual(page.data.map(task => task.id), [second.id]);
+    const page = tasks.list(
+      querySchema.parse({ assignee: 'Ana', status: 'pendiente', limit: '1', page: '2' }),
+    );
+    assert.deepEqual(
+      page.data.map((task) => task.id),
+      [second.id],
+    );
     assert.equal(page.meta.total, 2);
     assert.equal(page.meta.totalPages, 2);
     assert.equal(tasks.update(first.id, { status: 'hecha' })!.title, input.title);
@@ -28,13 +33,22 @@ test('persistencia: CRUD completo, filtros combinados y paginación', () => {
     assert.equal(tasks.delete(first.id), false);
     assert.equal(tasks.get(first.id), undefined);
     assert.equal(tasks.update(first.id, { title: 'Ausente' }), undefined);
-  } finally { db.close(); }
+  } finally {
+    db.close();
+  }
 });
 
 test('validación: fechas reales, límites y campos desconocidos', () => {
   assert.equal(createTaskSchema.parse({ ...input, title: '  Entrega  ' }).title, 'Entrega');
   assert.ok(createTaskSchema.safeParse({ ...input, dueDate: '2024-02-29' }).success);
-  for (const changes of [{ title: ' ' }, { dueDate: '2026-02-29' }, { dueDate: '2026-04-31' }, { assignee: null }, { extra: true }, { description: 'a'.repeat(5001) }]) {
+  for (const changes of [
+    { title: ' ' },
+    { dueDate: '2026-02-29' },
+    { dueDate: '2026-04-31' },
+    { assignee: null },
+    { extra: true },
+    { description: 'a'.repeat(5001) },
+  ]) {
     assert.equal(createTaskSchema.safeParse({ ...input, ...changes }).success, false);
   }
   assert.equal(updateTaskSchema.safeParse({}).success, false);
@@ -44,7 +58,14 @@ test('validación: fechas reales, límites y campos desconocidos', () => {
 
 test('validación: paginación acotada y parámetros repetidos rechazados', () => {
   assert.deepEqual(querySchema.parse({}), { page: 1, limit: 20 });
-  for (const query of [{ page: '0' }, { page: '1.5' }, { limit: '101' }, { limit: ['1', '2'] }, { status: 'otro' }, { unknown: 'x' }]) {
+  for (const query of [
+    { page: '0' },
+    { page: '1.5' },
+    { limit: '101' },
+    { limit: ['1', '2'] },
+    { status: 'otro' },
+    { unknown: 'x' },
+  ]) {
     assert.equal(querySchema.safeParse(query).success, false);
   }
 });

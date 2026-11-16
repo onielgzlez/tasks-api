@@ -12,12 +12,24 @@ test('migraciones repetibles y persistencia al reabrir la base', () => {
   const path = join(directory, 'tasks.sqlite');
   let db = openDatabase(path);
   try {
-    migrate(db); migrate(db);
-    const task = new TaskRepository(db).create({ title: 'Persistir', description: '', status: 'pendiente', assignee: 'Ana', dueDate: '2026-12-10' });
-    db.close(); db = openDatabase(path); migrate(db);
+    migrate(db);
+    migrate(db);
+    const task = new TaskRepository(db).create({
+      title: 'Persistir',
+      description: '',
+      status: 'pendiente',
+      assignee: 'Ana',
+      dueDate: '2026-12-10',
+    });
+    db.close();
+    db = openDatabase(path);
+    migrate(db);
     assert.deepEqual(new TaskRepository(db).get(task.id), task);
     assert.equal(db.prepare('SELECT count(*) AS n FROM schema_migrations').get()!.n, 2);
-  } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
+  } finally {
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('una migración fallida revierte el esquema y se detectan cambios posteriores', () => {
@@ -25,14 +37,23 @@ test('una migración fallida revierte el esquema y se detectan cambios posterior
   const url = pathToFileURL(`${directory}/`);
   const db = openDatabase(':memory:');
   try {
-    writeFileSync(join(directory, '001_test.sql'), 'CREATE TABLE example(id INTEGER); INVALID SQL;');
+    writeFileSync(
+      join(directory, '001_test.sql'),
+      'CREATE TABLE example(id INTEGER); INVALID SQL;',
+    );
     assert.throws(() => migrate(db, url));
-    assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name='example'").get(), undefined);
+    assert.equal(
+      db.prepare("SELECT name FROM sqlite_master WHERE name='example'").get(),
+      undefined,
+    );
     writeFileSync(join(directory, '001_test.sql'), 'CREATE TABLE example(id INTEGER);');
     migrate(db, url);
     writeFileSync(join(directory, '001_test.sql'), 'CREATE TABLE changed(id INTEGER);');
     assert.throws(() => migrate(db, url), /Applied migration changed/);
-  } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
+  } finally {
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('una escritura bloqueada falla de inmediato y se recupera al liberar el bloqueo', () => {
@@ -47,28 +68,46 @@ test('una escritura bloqueada falla de inmediato y se recupera al liberar el blo
     assert.equal(db.prepare('PRAGMA busy_timeout').get()!.timeout, 0);
     other.exec('BEGIN IMMEDIATE');
     const tasks = new TaskRepository(db);
-    const input = { title: 'Entrega', description: '', status: 'pendiente' as const, assignee: 'Ana', dueDate: '2026-12-10' };
-    assert.throws(() => tasks.create(input), (error: unknown) => {
-      assert.ok(error instanceof Error && 'errcode' in error);
-      assert.equal(Number(error.errcode) & 0xff, 5);
-      assert.equal(isDatabaseBusy(error), true);
-      return true;
-    });
+    const input = {
+      title: 'Entrega',
+      description: '',
+      status: 'pendiente' as const,
+      assignee: 'Ana',
+      dueDate: '2026-12-10',
+    };
+    assert.throws(
+      () => tasks.create(input),
+      (error: unknown) => {
+        assert.ok(error instanceof Error && 'errcode' in error);
+        assert.equal(Number(error.errcode) & 0xff, 5);
+        assert.equal(isDatabaseBusy(error), true);
+        return true;
+      },
+    );
     assert.equal(tasks.list({ page: 1, limit: 20 }).meta.total, 0);
     other.exec('ROLLBACK');
     const saved = tasks.create(input);
     assert.equal(tasks.get(saved.id)!.title, input.title);
-  } finally { other?.close(); db.close(); rmSync(directory, { recursive: true, force: true }); }
+  } finally {
+    other?.close();
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
-
 
 test('solo los errores SQLITE_BUSY se consideran conflictos temporales', () => {
   for (const errcode of [5, 261, 517, 773]) {
-    assert.equal(isDatabaseBusy(Object.assign(new Error('busy'), { code: 'ERR_SQLITE_ERROR', errcode })), true);
+    assert.equal(
+      isDatabaseBusy(Object.assign(new Error('busy'), { code: 'ERR_SQLITE_ERROR', errcode })),
+      true,
+    );
   }
-  for (const error of [null, new Error('database is locked'),
+  for (const error of [
+    null,
+    new Error('database is locked'),
     Object.assign(new Error('locked'), { code: 'ERR_SQLITE_ERROR', errcode: 6 }),
-    Object.assign(new Error('constraint'), { code: 'ERR_SQLITE_ERROR', errcode: 19 })]) {
+    Object.assign(new Error('constraint'), { code: 'ERR_SQLITE_ERROR', errcode: 19 }),
+  ]) {
     assert.equal(isDatabaseBusy(error), false);
   }
 });
@@ -81,31 +120,54 @@ test('el filtro por responsable y el combinado no requieren ordenar fuera del í
       ['assignee = ?', ['Ana']],
       ['assignee = ? AND status = ?', ['Ana', 'pendiente']],
     ] as const) {
-      const plan = db.prepare(`EXPLAIN QUERY PLAN SELECT * FROM tasks WHERE ${where} ORDER BY id LIMIT ? OFFSET ?`)
+      const plan = db
+        .prepare(
+          `EXPLAIN QUERY PLAN SELECT * FROM tasks WHERE ${where} ORDER BY id LIMIT ? OFFSET ?`,
+        )
         .all(...params, 20, 0);
-      assert.ok(plan.every(step => !String(step.detail).includes('TEMP B-TREE')), JSON.stringify(plan));
+      assert.ok(
+        plan.every((step) => !String(step.detail).includes('TEMP B-TREE')),
+        JSON.stringify(plan),
+      );
     }
-  } finally { db.close(); }
+  } finally {
+    db.close();
+  }
 });
-
 
 test('la segunda migración actualiza una base existente sin perder tareas', () => {
   const directory = mkdtempSync(join(tmpdir(), 'tasks-upgrade-'));
   const db = openDatabase(':memory:');
   try {
-    writeFileSync(join(directory, '001_create_tasks.sql'),
-      readFileSync(new URL('../migrations/001_create_tasks.sql', import.meta.url)));
+    writeFileSync(
+      join(directory, '001_create_tasks.sql'),
+      readFileSync(new URL('../migrations/001_create_tasks.sql', import.meta.url)),
+    );
     migrate(db, pathToFileURL(`${directory}/`));
     const tasks = new TaskRepository(db);
-    const task = tasks.create({ title: 'Existente', description: '', status: 'pendiente', assignee: 'Ana', dueDate: '2026-12-10' });
+    const task = tasks.create({
+      title: 'Existente',
+      description: '',
+      status: 'pendiente',
+      assignee: 'Ana',
+      dueDate: '2026-12-10',
+    });
     migrate(db);
     migrate(db);
     assert.deepEqual(tasks.get(task.id), task);
-    assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'tasks_assignee_id'").get());
+    assert.ok(
+      db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'tasks_assignee_id'",
+        )
+        .get(),
+    );
     assert.equal(db.prepare('SELECT count(*) AS n FROM schema_migrations').get()!.n, 2);
-  } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
+  } finally {
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
-
 
 test('la cuota se comparte entre conexiones y persiste tras reabrir la base', () => {
   const directory = mkdtempSync(join(tmpdir(), 'tasks-quota-'));
@@ -115,12 +177,23 @@ test('la cuota se comparte entre conexiones y persiste tras reabrir la base', ()
   try {
     migrate(db);
     const first = new TaskRepository(db, 1);
-    const input = { title: 'Cuota', description: '', status: 'pendiente' as const, assignee: 'Ana', dueDate: '2026-12-10' };
+    const input = {
+      title: 'Cuota',
+      description: '',
+      status: 'pendiente' as const,
+      assignee: 'Ana',
+      dueDate: '2026-12-10',
+    };
     first.create(input);
     other = openDatabase(path);
     assert.throws(() => new TaskRepository(other!, 1).create(input), TaskCapacityError);
-    other.close(); other = openDatabase(path);
+    other.close();
+    other = openDatabase(path);
     assert.throws(() => new TaskRepository(other!, 1).create(input), TaskCapacityError);
     assert.equal(first.list({ page: 1, limit: 20 }).meta.total, 1);
-  } finally { other?.close(); db.close(); rmSync(directory, { recursive: true, force: true }); }
+  } finally {
+    other?.close();
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
